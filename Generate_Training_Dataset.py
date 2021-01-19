@@ -463,26 +463,18 @@ def makeIndicatorVariationArray():
     stationsPerLat = defaultdict(list)
     intermediateLocalIndicatorVariationArray = np.empty_like(localIndicatorVariationArray)
     intermediateLocalNormalized01StationIndicatorVariation = np.empty_like(localNormalized01StationIndicatorVariation)
-    alreadyFilled = False
+
     for st in stationsOut.keys():
-        alreadyFilled=False
         for i in range(latMin, latMax):
             if not isinstance(stationsOut[st], matlab.double):
                 if i == np.round(np.int16(stationsOut[st].get("latgeo")),0):
                     stationsPerLat[i-latMin].append(st)
                     if len(stationsPerLat[i-latMin])>1:
-                        alreadyFilled=True
                         if normalized01StationIndicatorVariation[st]:
-                            if alreadyFilled==True:
                                 stName = stationsPerLat[i-latMin][stationsPerLat[i-latMin].index(min(stationsPerLat[i-latMin]))-1]
                                 localIndicatorVariationArray[i-latMin] = normalized01StationIndicatorVariation[stName]
                                 localNormalized01StationIndicatorVariation[i-latMin] = normalized01StationIndicatorVariation[stName]
                                 indicatorVariationArrayLocalTime[i-latMin] = indexValueOnLocalTime(localNormalized01StationIndicatorVariation, stName, i-latMin)
-                                indicatorVariationArray[i-latMin] = localIndicatorVariationArray[i-latMin]
-                            else:
-                                localIndicatorVariationArray[i-latMin] = normalized01StationIndicatorVariation[st]
-                                localNormalized01StationIndicatorVariation[i-latMin] = normalized01StationIndicatorVariation[st]
-                                indicatorVariationArrayLocalTime[i-latMin] = indexValueOnLocalTime(localNormalized01StationIndicatorVariation, st, i-latMin)
                                 indicatorVariationArray[i-latMin] = localIndicatorVariationArray[i-latMin]
                     else: 
                         if len(stationIndicatorVariation[st])!=0:
