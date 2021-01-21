@@ -121,7 +121,8 @@ latMax=0
 
 longMin=0
 longMax=0
-    
+
+stationsLatitude = [] # all the working stations for the given matrix, with their latitude
 stationIndicatorRatioVariation = defaultdict(list) # dictionary assigning to each station name it's weight
 numberOfMinutesNeededInTheTimeStamp=0 # the number of minutes within numberOfDaysWithData
 timeBetweenValues=0 # how many minutes do we want between each values for one station (increases consequently the computing time)
@@ -132,6 +133,61 @@ normalized01StationIndicatorVariation = defaultdict(list) # same as indicatorVar
 maxValueinDataset=0 # the maximum value in the current matrix
 minValueinDataset=0 # the minimum value in the current matrix
 ReconstructedArray = np.array([]) # same as normalized01StationIndicatorVariation
+
+
+# ### EmptyVariables()
+# 
+# Free all the arrays and dictionaries memory for a fresh loop restart of the following day.
+
+# In[4]:
+
+
+def EmptyVariables():
+    global stationIndicatorRatioVariation, indicatorVariationArray, indicatorVariationArrayLocalTime, normalized01StationIndicatorVariation, ReconstructedArray, stationsWithNoData, stationsNonexistentInFolder, stationsOut, stationIndicatorVariation
+    
+    stationIndicatorRatioVariation = defaultdict(list)
+    indicatorVariationArray = np.array([])
+    indicatorVariationArrayLocalTime = np.array([])
+    normalized01StationIndicatorVariation = defaultdict(list)
+    ReconstructedArray = np.array([])
+    stationsWithNoData = []
+    stationsNonexistentInFolder = []
+    stationsOut = dict()
+    stationIndicatorVariation = defaultdict(list)
+
+
+# In[61]:
+
+
+def ChoosePresetArea(area,customArea):
+    america = [30,54,240,307]
+    asia = [30,54,57,159]
+    europe = [40,64,0,50]
+    laMin = 0
+    laMax = 0 
+    lonMin = 0 
+    lonMax = 0
+    if area == 'america':
+        laMin=america[0]
+        laMax=america[1]
+        lonMin=america[2]
+        lonMax=america[3]
+    elif area == 'asia':
+        laMin=asia[0]
+        laMax=asia[1]
+        lonMin=asia[2]
+        lonMax=asia[3]
+    elif area == 'europe':
+        laMin=europe[0]
+        laMax=europe[1]
+        lonMin=europe[2]
+        lonMax=europe[3]
+    elif area == 'custom':
+        laMin=customArea[0]
+        laMax=customArea[1]
+        lonMin=customArea[2]
+        lonMax=customArea[3]
+    return laMin, laMax, lonMin, lonMax
 
 
 # ### GenerateTrainingSet(`str`, `list`, `list`, `int`, `int`, `int`, `int`, `int`, `int`, `str`)
@@ -170,48 +226,37 @@ ReconstructedArray = np.array([]) # same as normalized01StationIndicatorVariatio
 # ```
 # `allow_pickle=True` and `encoding="latin1"` allows us to load `object` values into `numpy` arrays.
 
-# In[33]:
+# In[43]:
 
 
 def GenerateTrainingSet(indice, 
                         startingDate, 
                         endingDate, 
-                        latitudeMinimum, 
-                        latitudeMaximum, 
-                        longitudeMinimum, 
-                        longitudeMaximum, 
+                        area,
                         numberOfDaysPerMatrix, 
                         minutesBetweenValues, 
-                        regressor):
+                        regressor,
+                        customArea=[0,0,0,0]):
 
-    global startDateMatrix
-    global endDateMatrix
-    global startDateMatlab
-    global endDateMatlab
-    global stationsWithNoData
-    global stationsNonexistentInFolder
-    global stationsOut
-    global indicatorVariationArrayLocalTime
-    global numberOfDaysWithData
-    global latMin,latMax,longMin,longMax
-    global timeBetweenValues
+    global startDateMatrix, endDateMatrix, startDateMatlab, endDateMatlab, stationsWithNoData, stationsNonexistentInFolder, stationsOut, indicatorVariationArrayLocalTime, numberOfDaysWithData, latMin,latMax,longMin,longMax, timeBetweenValues, stationsLatitude
     
     absoluteStartDate = datetime.datetime(startingDate[0],startingDate[1],startingDate[2],0,0,0)
     absoluteEndDate = datetime.datetime(endingDate[0],endingDate[1],endingDate[2],0,0,0)
-    latMin=latitudeMinimum
-    latMax=latitudeMaximum
-    longMin=longitudeMinimum
-    longMax=longitudeMaximum
+
+
+    
+    
     timeBetweenValues=minutesBetweenValues
     numberOfDaysWithData=numberOfDaysPerMatrix+2
-    
     index=0
     isQuietDay = False
     
     dataSetSize = absoluteEndDate-absoluteStartDate
     
     for i in range(0,dataSetSize.days,numberOfDaysPerMatrix):
-        
+        EmptyVariables()
+        latMin, latMax, longMin, longMax = ChoosePresetArea(area,customArea)
+        stationsLatitude = [''] * (latMax-latMin)
         startDateMatrix = absoluteStartDate+datetime.timedelta(days=i)
         endDateMatrix = startDateMatrix+datetime.timedelta(days=numberOfDaysWithData)
         startDateMatlab = [startDateMatrix.year, startDateMatrix.month, startDateMatrix.day, 0, 0, 0]
@@ -220,10 +265,11 @@ def GenerateTrainingSet(indice,
         sys.stdout.flush() # flushes the verbose output allowing us to read everything on time if we launch the script in a nohup subshell 
         RequestMatlab()
         MakeStationIndicatorVariation(timeBetweenValues=timeBetweenValues, indice=indice)
-        ManuallyNormalizeData01()      
-        makeIndicatorVariationArray()
+        ManuallyNormalizeData01()  
+        makeIndicatorVariationArray(stationsLatitude)
         ResizeForPlot()
-        RemoveDefectiveStation(indicatorVariationArrayLocalTime)
+        beforeVariance = indicatorVariationArrayLocalTime.copy()
+        RemoveDefectiveStationVariance(indicatorVariationArrayLocalTime)
         ReconstructedArray = PredictIndicatorForAllLatitudes(indicatorVariationArrayLocalTime, regressor)
         for a in quietDays:
             compare = np.array(startDateMatlab) == a
@@ -232,8 +278,8 @@ def GenerateTrainingSet(indice,
                 break
             else: 
                 isQuietDay = False 
-        infosArray = np.array([startDateMatrix, latMax, latMin, longMax, longMin, maxValueinDataset, minValueinDataset, numberOfDaysPerMatrix, isQuietDay, indice])
-        FinalArray = np.array([indicatorVariationArrayLocalTime, ReconstructedArray, infosArray])
+        infosArray = np.array([startDateMatrix, latMax, latMin, longMax, longMin, maxValueinDataset, minValueinDataset, numberOfDaysPerMatrix, isQuietDay, indice, stationsLatitude, np.array([area, customArea])])
+        FinalArray = np.array([indicatorVariationArrayLocalTime, ReconstructedArray, infosArray, beforeVariance])
         np.save("{}/x_train/{}_{}".format(trainingDatasetPath, indice, index), FinalArray)
         print("Matrix saved for date: {}".format(startDateMatrix))
         print("Sample {} out of {}".format(i/numberOfDaysPerMatrix, dataSetSize.days/numberOfDaysPerMatrix))
@@ -249,7 +295,7 @@ def GenerateTrainingSet(indice,
 # 
 # <img src="Notebook_images/DelusionalDataGreen.jpg" alt="drawing" width="300"/>
 
-# In[5]:
+# In[7]:
 
 
 def RemoveDefectiveStation(array):
@@ -262,20 +308,27 @@ def RemoveDefectiveStation(array):
     array[np.int16(rmseRefIndex[np.argmax(rmseRef)])] = np.full(array.shape[1], np.nan)
     return array
 
+def RemoveDefectiveStationVariance(array):
+    for i in range(array.shape[0]):
+        if np.var(array[i]) < 0.5: #valeur arbitraire
+            array[i] = np.full(array.shape[1], np.nan)
+    return array
+
 
 # ### RequestMatlab()
 # Stores all the `indices_alpha` output in a dictionary 
 
-# In[6]:
+# In[8]:
 
 
 def RequestMatlab():
-    global startDateMatlab, endDateMatlab, startDateMatrix, endDate, year, month, day
+    global startDateMatlab, endDateMatlab, startDateMatrix, endDate, year, month, day, stationsOut
     for i in range(0,allStationCodes.shape[0]): 
         if allStationLatgeos[i]>latMin and allStationLatgeos[i]<latMax and allStationLongeos[i]>longMin and allStationLongeos[i]<longMax:
             try:
                 stationsOut[allStationCodes[i]] = eng.indices_alpha(matlab.double(startDateMatlab), matlab.double(endDateMatlab),str(allStationCodes[i]))
             except:
+                print('error with {}'.format(startDateMatlab))
                 stationsNonexistentInFolder.append(st)
 
 
@@ -288,7 +341,7 @@ def RequestMatlab():
 # $$\frac{\sqrt{x1^2 + y1^2 + z1^2}}{\beta}$$
 # with $β$ the magnitude of `igrf` for the given time and station
 
-# In[7]:
+# In[9]:
 
 
 def IndicatorCalculation(dataSt, timeshift, currentDate, igrf, indice):
@@ -311,7 +364,7 @@ def IndicatorCalculation(dataSt, timeshift, currentDate, igrf, indice):
 # ```
 # notifies python that Matlab is going to output 4 results and all of them has to be taken in account. By default, when dealing with multiple outputs, python only stores the last of them. So the `b` variable in the line above will be an array and not a single float.
 
-# In[8]:
+# In[10]:
 
 
 def CalculateIGRF(dataSt, currentDate):    
@@ -327,7 +380,7 @@ def CalculateIGRF(dataSt, currentDate):
 # ### MakeStationIndicatorVariation()
 # Fills `stationIndicatorVariation` and `stationIndicatorRatioVariation` containing a single indice type and the `igrf` ratio for each station
 
-# In[9]:
+# In[11]:
 
 
 def MakeStationIndicatorVariation(timeBetweenValues, indice):
@@ -360,7 +413,7 @@ def MakeStationIndicatorVariation(timeBetweenValues, indice):
 # ### normalizeWithGivenBounds(`numpy.array`, `numpy.array`)
 # Normalizes all the values of a vector between the wanted bounds
 
-# In[10]:
+# In[12]:
 
 
 def normalizeWithGivenBounds(values, bounds):
@@ -374,7 +427,7 @@ def normalizeWithGivenBounds(values, bounds):
 # 
 # This `def` fills also the maximum and minimum values in the matrix before rescaling everything, allowing us to rescale them to their default values when nedeed. (does the same process for the weights)
 
-# In[11]:
+# In[13]:
 
 
 def ManuallyNormalizeData01():
@@ -413,8 +466,8 @@ def ManuallyNormalizeData01():
             localMinRatio = min(stationIndicatorRatioVariation[st])
             
             IndicatorVariationAppliedRatio=stationIndicatorVariation.copy()
-            for i in range(0, len(stationIndicatorVariation[st])):
-                IndicatorVariationAppliedRatio[st][i] = stationIndicatorVariation[st][i]*stationIndicatorRatioVariation[st][i]
+#             for i in range(0, len(stationIndicatorVariation[st])):
+#                 IndicatorVariationAppliedRatio[st][i] = stationIndicatorVariation[st][i]*stationIndicatorRatioVariation[st][i]
             normalized01StationIndicatorVariation[st] = normalizeWithGivenBounds(np.array(IndicatorVariationAppliedRatio[st]), {'actual': {'lower': totalMin, 'upper': totalMax}, 'desired': {'lower': bounds[0], 'upper': bounds[1]}})
 
 
@@ -425,7 +478,7 @@ def ManuallyNormalizeData01():
 # 
 # <img src="Notebook_images/VariationUTC_LocalTime.png" alt="drawing" width="800"/>
 
-# In[12]:
+# In[48]:
 
 
 def indexValueOnLocalTime(array, stationName, i):
@@ -437,7 +490,7 @@ def indexValueOnLocalTime(array, stationName, i):
     decreasingIndex=0
     increasingIndex=0
     for y in range(np.int16(numberOfValues/numberOfDaysWithData),numberOfValues):
-        localTimeValuesArray[np.int16(shiftValues+increasingIndex)] = array[i][y-np.int16(shiftValues)]
+        localTimeValuesArray[np.int16(shiftValues+increasingIndex)] = array[i][y]
         increasingIndex+=1
             
     return localTimeValuesArray 
@@ -448,10 +501,10 @@ def indexValueOnLocalTime(array, stationName, i):
 # 
 # __When the `def` encounters two stations located at the same latitude, it automatically overwrite a station with the closest one to Greenwich.__ 
 
-# In[24]:
+# In[15]:
 
 
-def makeIndicatorVariationArray():
+def makeIndicatorVariationArray(stationLatitude):
     global indicatorVariationArray
     global indicatorVariationArrayLocalTime
       
@@ -463,25 +516,17 @@ def makeIndicatorVariationArray():
     stationsPerLat = defaultdict(list)
     intermediateLocalIndicatorVariationArray = np.empty_like(localIndicatorVariationArray)
     intermediateLocalNormalized01StationIndicatorVariation = np.empty_like(localNormalized01StationIndicatorVariation)
-
     for st in stationsOut.keys():
         for i in range(latMin, latMax):
             if not isinstance(stationsOut[st], matlab.double):
                 if i == np.round(np.int16(stationsOut[st].get("latgeo")),0):
                     stationsPerLat[i-latMin].append(st)
-                    if len(stationsPerLat[i-latMin])>1:
-                        if normalized01StationIndicatorVariation[st]:
-                                stName = stationsPerLat[i-latMin][stationsPerLat[i-latMin].index(min(stationsPerLat[i-latMin]))-1]
-                                localIndicatorVariationArray[i-latMin] = normalized01StationIndicatorVariation[stName]
-                                localNormalized01StationIndicatorVariation[i-latMin] = normalized01StationIndicatorVariation[stName]
-                                indicatorVariationArrayLocalTime[i-latMin] = indexValueOnLocalTime(localNormalized01StationIndicatorVariation, stName, i-latMin)
-                                indicatorVariationArray[i-latMin] = localIndicatorVariationArray[i-latMin]
-                    else: 
-                        if len(stationIndicatorVariation[st])!=0:
-                            indicatorVariationArray[i-latMin]=stationIndicatorVariation[st]
-                            indicatorVariationArrayLocalTime[i-latMin] = indexValueOnLocalTime(indicatorVariationArray, st, i-latMin)
-                        else:
-                            None
+                    if len(stationIndicatorVariation[st])!=0:
+                        indicatorVariationArray[i-latMin]=stationIndicatorVariation[st]
+                        indicatorVariationArrayLocalTime[i-latMin] = indexValueOnLocalTime(indicatorVariationArray, st, i-latMin)
+                        stationLatitude[i-latMin] = st
+                    else:
+                        None
                 else:
                     None
 
@@ -489,7 +534,7 @@ def makeIndicatorVariationArray():
 # ### ResizeForPlot()
 # Because we are using one more day to the right and to the left to have enough space for `indexValueOnLocalTime()`, this `def` cuts the additional days to keep the one we are interrested in.
 
-# In[14]:
+# In[16]:
 
 
 def ResizeForPlot():
@@ -533,7 +578,7 @@ def ResizeForPlot():
 # 
 # Starting from this matrix : <img src="Notebook_images/groundTruth.png" alt="drawing" width="300"/> the reconstruction outputs this result: <img src="Notebook_images/groundTruthML.png" alt="drawing" width="300"/>
 
-# In[37]:
+# In[17]:
 
 
 def PredictIndicatorForAllLatitudes(baseArray, regressor):
@@ -569,7 +614,7 @@ def PredictIndicatorForAllLatitudes(baseArray, regressor):
 # ```
 # To gain processing time, this functionality is disabled by default. It can be enabled by replacing `RegressorParameters` allocation with the `ParametersTuningPoly(numpy.array,int)` function, which outputs a dictionary of parameters resulted from the tuning.
 
-# In[16]:
+# In[18]:
 
 
 def GetIndicatorLongPrediction(latitude,longitude, params, baseArray, regressor):
@@ -592,7 +637,7 @@ def GetIndicatorLongPrediction(latitude,longitude, params, baseArray, regressor)
 # 
 # Takes as input all the indice values corresponding to each latitudes of the matrix, detects where there are nans and remove them.
 
-# In[17]:
+# In[19]:
 
 
 def RemoveNan(latValues, indicatorValues):
@@ -613,7 +658,7 @@ def RemoveNan(latValues, indicatorValues):
 # Makes a polynomial regression. `poly_grid.fit(X,Y)` where `X` is the latitude and `Y` is the indice.
 # The `PolynomialRegression()` definition is custom and detailed below.
 
-# In[18]:
+# In[20]:
 
 
 def PolyRegression(latValues, indicatorValues, params):
@@ -623,7 +668,7 @@ def PolyRegression(latValues, indicatorValues, params):
     return poly_grid
 
 
-# In[19]:
+# In[21]:
 
 
 def RandomForestRegression(latValues, indicatorValues, params):
@@ -633,7 +678,7 @@ def RandomForestRegression(latValues, indicatorValues, params):
     return rf
 
 
-# In[20]:
+# In[22]:
 
 
 def SupportVectorMachineRegression(latValues, indicatorValues, params):
@@ -647,7 +692,7 @@ def SupportVectorMachineRegression(latValues, indicatorValues, params):
 # 
 # Makes a python pipeline out of `sklearn.preprocessing.PolynomialFeatures` and `sklearn.linear_model.LinearRegression`. This allows us to use a linear regression algorithm on a non-linear fit, giving as parameter the polynom's degree.  
 
-# In[21]:
+# In[23]:
 
 
 def PolynomialRegression(degree=2, **kwargs):
@@ -658,7 +703,7 @@ def PolynomialRegression(degree=2, **kwargs):
 # 
 # Makes a quick fit on a given array of data to evaluate the best parameters on the current set. We are testing polynomial degrees from 2 to 5 and check if we should use `linearregression__fit_intercept` or `linearregression__normalize`.
 
-# In[22]:
+# In[24]:
 
 
 def ParametersTuningPoly(baseArray,long):
@@ -675,16 +720,13 @@ def ParametersTuningPoly(baseArray,long):
     return poly_gridTuning.best_params_
 
 
-# In[42]:
+# In[59]:
 
 
 GenerateTrainingSet(indice='y2', 
                     startingDate=[1995,1,1], 
-                    endingDate=[2015,1,1], 
-                    latitudeMinimum=30, 
-                    latitudeMaximum=54, 
-                    longitudeMinimum=240, 
-                    longitudeMaximum=307, 
+                    endingDate=[2015,12,30],
+                    area='america',
                     numberOfDaysPerMatrix=1, 
                     minutesBetweenValues=10, 
                     regressor='svr') # launch the main def
