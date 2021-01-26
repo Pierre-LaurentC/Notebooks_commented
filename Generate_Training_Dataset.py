@@ -20,7 +20,9 @@
 
 
 import warnings
+from sklearn.exceptions import DataConversionWarning
 warnings.filterwarnings("ignore", category=DeprecationWarning) 
+warnings.filterwarnings("ignore", category=DataConversionWarning) 
 import matlab.engine
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -42,6 +44,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.svm import SVR
 from sklearn.metrics import mean_squared_error
 from IPython.display import clear_output
+import Tkinter as tk
+import ttk
 
 
 # Python allows us to run Matlab functions in background and retrieve their output. The Output format will, of course, be specific, for example, a `float ` output coming out from a Matlab function will be interpreted as `matlab.double` for Linux and `matlab.mlarray.double` for Windows.
@@ -94,6 +98,7 @@ stationIndicatorVariation = defaultdict(list) # split of stationsOut, contains t
 
 # Setting up the paths (relative path obviously, needs to be changed if the folder structure changes)
 trainingDatasetPath = "../TrainingDataset"
+trainingDatasetPathASIA = "../TrainingDataset/Asia/"
 # Windows : "D:/IRAP/TrainingDataset"
 # Linux : "../TrainingDataset"
 
@@ -156,7 +161,7 @@ def EmptyVariables():
     stationIndicatorVariation = defaultdict(list)
 
 
-# In[61]:
+# In[5]:
 
 
 def ChoosePresetArea(area,customArea):
@@ -226,7 +231,7 @@ def ChoosePresetArea(area,customArea):
 # ```
 # `allow_pickle=True` and `encoding="latin1"` allows us to load `object` values into `numpy` arrays.
 
-# In[43]:
+# In[6]:
 
 
 def GenerateTrainingSet(indice, 
@@ -236,10 +241,11 @@ def GenerateTrainingSet(indice,
                         numberOfDaysPerMatrix, 
                         minutesBetweenValues, 
                         regressor,
-                        customArea=[0,0,0,0]):
+                        customArea=[0,0,0,0],
+                        interface=False,
+                        application=None):
 
     global startDateMatrix, endDateMatrix, startDateMatlab, endDateMatlab, stationsWithNoData, stationsNonexistentInFolder, stationsOut, indicatorVariationArrayLocalTime, numberOfDaysWithData, latMin,latMax,longMin,longMax, timeBetweenValues, stationsLatitude
-    
     absoluteStartDate = datetime.datetime(startingDate[0],startingDate[1],startingDate[2],0,0,0)
     absoluteEndDate = datetime.datetime(endingDate[0],endingDate[1],endingDate[2],0,0,0)
 
@@ -266,7 +272,7 @@ def GenerateTrainingSet(indice,
         RequestMatlab()
         MakeStationIndicatorVariation(timeBetweenValues=timeBetweenValues, indice=indice)
         ManuallyNormalizeData01()  
-        makeIndicatorVariationArray(stationsLatitude)
+        makeIndicatorVariationArray(stationsLatitude, longMin)
         ResizeForPlot()
         beforeVariance = indicatorVariationArrayLocalTime.copy()
         RemoveDefectiveStationVariance(indicatorVariationArrayLocalTime)
@@ -280,10 +286,14 @@ def GenerateTrainingSet(indice,
                 isQuietDay = False 
         infosArray = np.array([startDateMatrix, latMax, latMin, longMax, longMin, maxValueinDataset, minValueinDataset, numberOfDaysPerMatrix, isQuietDay, indice, stationsLatitude, np.array([area, customArea])])
         FinalArray = np.array([indicatorVariationArrayLocalTime, ReconstructedArray, infosArray, beforeVariance])
-        np.save("{}/x_train/{}_{}".format(trainingDatasetPath, indice, index), FinalArray)
+        np.save("{}/x_train/{}_{}".format(trainingDatasetPathASIA, indice, index), FinalArray)
         print("Matrix saved for date: {}".format(startDateMatrix))
         print("Sample {} out of {}".format(i/numberOfDaysPerMatrix, dataSetSize.days/numberOfDaysPerMatrix))
+        
         index+=1
+        if interface:
+            UpdateProgressBar(int(dataSetSize.days/numberOfDaysPerMatrix), int(i/numberOfDaysPerMatrix)+1, application)
+            application.update_idletasks()
         clear_output(wait=True)
 
 
@@ -478,10 +488,10 @@ def ManuallyNormalizeData01():
 # 
 # <img src="Notebook_images/VariationUTC_LocalTime.png" alt="drawing" width="800"/>
 
-# In[48]:
+# In[14]:
 
 
-def indexValueOnLocalTime(array, stationName, i):
+def indexValueOnLocalTime(array, stationName, i, referenceLongitude):
     numberOfValuesLong = array.shape[1]
     localTimeValuesArray = np.full((numberOfValuesLong), np.nan)
     long = float(stationsOut[stationName].get("longeo"))
@@ -496,15 +506,31 @@ def indexValueOnLocalTime(array, stationName, i):
     return localTimeValuesArray 
 
 
+# In[15]:
+
+
+def indexValueOnLocalTimeRefLong(array, stationName, i, refLong):
+    numberOfValuesLong = array.shape[1]
+    localTimeValuesArray = np.full((numberOfValuesLong), np.nan)
+    long = float(stationsOut[stationName].get("longeo"))
+    shiftValues = np.round(((long-refLong)*4)/timeBetweenValues,0)
+    increasingIndex=0
+    for y in range(np.int16(numberOfValues/numberOfDaysWithData),numberOfValues):
+        localTimeValuesArray[increasingIndex] = array[i][np.int16(y-shiftValues)]
+        increasingIndex+=1
+            
+    return localTimeValuesArray 
+
+
 # ### makeIndicatorVariationArray()
 # Fills `indicatorVariationArray` (UTC) and `indicatorVariationArrayLocalTime` (LT) which are the final versions we will contruct the dataSet on. They are `numpy.array` each rows corresponding to a latitude included between `latMax` and `latMin` with an axis=0 lenght equals to 1440/`timeBetweenValues` (1440 being the number of minutes in one day). in the current state of the art the shape of the arrays is (24,144), 24 = `latMax` - `latMin` and 144 = 1440 / `timeBetweenValues` with timeBetweenValues = 10 and 1440 = the number of minutes in 24h.
 # 
 # __When the `def` encounters two stations located at the same latitude, it automatically overwrite a station with the closest one to Greenwich.__ 
 
-# In[15]:
+# In[16]:
 
 
-def makeIndicatorVariationArray(stationLatitude):
+def makeIndicatorVariationArray(stationLatitude, minLong):
     global indicatorVariationArray
     global indicatorVariationArrayLocalTime
       
@@ -523,7 +549,7 @@ def makeIndicatorVariationArray(stationLatitude):
                     stationsPerLat[i-latMin].append(st)
                     if len(stationIndicatorVariation[st])!=0:
                         indicatorVariationArray[i-latMin]=stationIndicatorVariation[st]
-                        indicatorVariationArrayLocalTime[i-latMin] = indexValueOnLocalTime(indicatorVariationArray, st, i-latMin)
+                        indicatorVariationArrayLocalTime[i-latMin] = indexValueOnLocalTimeRefLong(indicatorVariationArray, st, i-latMin, minLong)
                         stationLatitude[i-latMin] = st
                     else:
                         None
@@ -534,7 +560,7 @@ def makeIndicatorVariationArray(stationLatitude):
 # ### ResizeForPlot()
 # Because we are using one more day to the right and to the left to have enough space for `indexValueOnLocalTime()`, this `def` cuts the additional days to keep the one we are interrested in.
 
-# In[16]:
+# In[17]:
 
 
 def ResizeForPlot():
@@ -578,7 +604,7 @@ def ResizeForPlot():
 # 
 # Starting from this matrix : <img src="Notebook_images/groundTruth.png" alt="drawing" width="300"/> the reconstruction outputs this result: <img src="Notebook_images/groundTruthML.png" alt="drawing" width="300"/>
 
-# In[17]:
+# In[18]:
 
 
 def PredictIndicatorForAllLatitudes(baseArray, regressor):
@@ -614,7 +640,7 @@ def PredictIndicatorForAllLatitudes(baseArray, regressor):
 # ```
 # To gain processing time, this functionality is disabled by default. It can be enabled by replacing `RegressorParameters` allocation with the `ParametersTuningPoly(numpy.array,int)` function, which outputs a dictionary of parameters resulted from the tuning.
 
-# In[18]:
+# In[19]:
 
 
 def GetIndicatorLongPrediction(latitude,longitude, params, baseArray, regressor):
@@ -637,7 +663,7 @@ def GetIndicatorLongPrediction(latitude,longitude, params, baseArray, regressor)
 # 
 # Takes as input all the indice values corresponding to each latitudes of the matrix, detects where there are nans and remove them.
 
-# In[19]:
+# In[20]:
 
 
 def RemoveNan(latValues, indicatorValues):
@@ -658,7 +684,7 @@ def RemoveNan(latValues, indicatorValues):
 # Makes a polynomial regression. `poly_grid.fit(X,Y)` where `X` is the latitude and `Y` is the indice.
 # The `PolynomialRegression()` definition is custom and detailed below.
 
-# In[20]:
+# In[21]:
 
 
 def PolyRegression(latValues, indicatorValues, params):
@@ -668,7 +694,7 @@ def PolyRegression(latValues, indicatorValues, params):
     return poly_grid
 
 
-# In[21]:
+# In[22]:
 
 
 def RandomForestRegression(latValues, indicatorValues, params):
@@ -678,7 +704,7 @@ def RandomForestRegression(latValues, indicatorValues, params):
     return rf
 
 
-# In[22]:
+# In[23]:
 
 
 def SupportVectorMachineRegression(latValues, indicatorValues, params):
@@ -692,7 +718,7 @@ def SupportVectorMachineRegression(latValues, indicatorValues, params):
 # 
 # Makes a python pipeline out of `sklearn.preprocessing.PolynomialFeatures` and `sklearn.linear_model.LinearRegression`. This allows us to use a linear regression algorithm on a non-linear fit, giving as parameter the polynom's degree.  
 
-# In[23]:
+# In[24]:
 
 
 def PolynomialRegression(degree=2, **kwargs):
@@ -703,7 +729,7 @@ def PolynomialRegression(degree=2, **kwargs):
 # 
 # Makes a quick fit on a given array of data to evaluate the best parameters on the current set. We are testing polynomial degrees from 2 to 5 and check if we should use `linearregression__fit_intercept` or `linearregression__normalize`.
 
-# In[24]:
+# In[25]:
 
 
 def ParametersTuningPoly(baseArray,long):
@@ -720,14 +746,104 @@ def ParametersTuningPoly(baseArray,long):
     return poly_gridTuning.best_params_
 
 
-# In[59]:
+# In[26]:
 
 
-GenerateTrainingSet(indice='y2', 
-                    startingDate=[1995,1,1], 
-                    endingDate=[2015,12,30],
-                    area='america',
-                    numberOfDaysPerMatrix=1, 
-                    minutesBetweenValues=10, 
-                    regressor='svr') # launch the main def
+class Interface(tk.Tk):
+    
+    def __init__(self):
+        tk.Tk.__init__(self)
+        self.CreateWidgets()
+    
+    def CreateWidgets(self):
+        self.parametersFrame = tk.Frame(self)
+        self.parametersFrame.pack()
+
+        self.eIndice=tk.Label(self.parametersFrame,text="Indice")
+        self.eIndice.grid(row=1,column=0)
+        self.eIndice=tk.Entry(self.parametersFrame)
+        self.eIndice.insert(tk.END, 'y2')
+        self.eIndice.grid(row=1,column=1)
+
+        self.eStartDate=tk.Label(self.parametersFrame,text="Starting date")
+        self.eStartDate.grid(row=2,column=0)
+        self.eStartDate=tk.Entry(self.parametersFrame)
+        self.eStartDate.insert(tk.END, '2015,1,1')
+        self.eStartDate.grid(row=2,column=1)
+
+        self.eEndDate=tk.Label(self.parametersFrame,text="Ending date")
+        self.eEndDate.grid(row=3,column=0)
+        self.eEndDate=tk.Entry(self.parametersFrame)
+        self.eEndDate.insert(tk.END, '2015,1,6')
+        self.eEndDate.grid(row=3,column=1)
+
+        self.eArea=tk.Label(self.parametersFrame,text="Area")
+        self.eArea.grid(row=4,column=0)
+        self.eArea=tk.Entry(self.parametersFrame)
+        self.eArea.insert(tk.END, 'asia')
+        self.eArea.grid(row=4,column=1)
+
+        self.eDays=tk.Label(self.parametersFrame,text="Days in the matrix")
+        self.eDays.grid(row=5,column=0)
+        self.eDays=tk.Entry(self.parametersFrame)
+        self.eDays.insert(tk.END, '1')
+        self.eDays.grid(row=5,column=1)
+
+        self.eMinutes=tk.Label(self.parametersFrame,text="Minutes between each value")
+        self.eMinutes.grid(row=6,column=0)
+        self.eMinutes=tk.Entry(self.parametersFrame)
+        self.eMinutes.insert(tk.END, '10')
+        self.eMinutes.grid(row=6,column=1)
+
+        self.eReg=tk.Label(self.parametersFrame,text="Machine Learning Regressor")
+        self.eReg.grid(row=7,column=0)
+        self.eReg=tk.Entry(self.parametersFrame)
+        self.eReg.insert(tk.END, 'svr')
+        self.eReg.grid(row=7,column=1)
+
+        
+        self.bLaunch = tk.Button(self, text='Start generator', command= lambda *args: GenerateTrainingSet(self.eIndice.get(), np.fromstring(self.eStartDate.get(), dtype=int, sep=','), np.fromstring(self.eEndDate.get(), dtype=int, sep=','), self.eArea.get(), int(self.eDays.get()), int(self.eMinutes.get()), self.eReg.get(), interface=True, application=self)).pack()
+
+        self.progressbar = ttk.Progressbar(self,orient ="horizontal",length = 200, mode ="determinate")
+        self.progressbar.pack()
+        self.progressbar["maximum"] = 100
+        self.progressbar["value"] = 0
+
+
+# In[27]:
+
+
+def UpdateProgressBar(maxValue, currentValue, app):
+    app.progressbar["maximum"]=maxValue
+    app.progressbar["value"]=currentValue
+
+
+# In[28]:
+
+
+
+if len(sys.argv) > 1:
+    if sys.argv[1]=='graphical':
+        app = Interface()
+        app.title("Dataset Generator")
+        app.resizable(width=False, height=False)
+
+        posX = (int(app.winfo_screenwidth()) // 2) - (400 // 2)
+        posY = (int(app.winfo_screenheight()) // 2) - (200 // 2)
+        geo = "{}x{}+{}+{}".format(400,200,posX,posY)
+        app.geometry(geo)
+        app.mainloop()
+    else: print("Unknown parameter")
+else:
+    GenerateTrainingSet(indice='y2', 
+            startingDate=[2015,1,1], 
+            endingDate=[2015,1,6],
+            area='asia',
+            numberOfDaysPerMatrix=1, 
+            minutesBetweenValues=10, 
+            regressor='svr') # launch the main def
+# In[ ]:
+
+
+
 
