@@ -46,6 +46,8 @@ from sklearn.metrics import mean_squared_error
 from IPython.display import clear_output
 import Tkinter as tk
 import ttk
+from tkFont import Font
+import threading
 
 
 # Python allows us to run Matlab functions in background and retrieve their output. The Output format will, of course, be specific, for example, a `float ` output coming out from a Matlab function will be interpreted as `matlab.double` for Linux and `matlab.mlarray.double` for Windows.
@@ -84,7 +86,7 @@ numberOfDaysWithData = 0
 # startDate and endDate will be modified through the execution, one day more each epoch. 
 startDateMatrix = datetime.datetime(2000,1,1,0,0,0)
 endDateMatrix = datetime.datetime(2000,1,1,0,0,0)
-absoluteStartDate = datetime.datetime(2000,1,1,0,0,0)
+absolutstartDate = datetime.datetime(2000,1,1,0,0,0)
 
 # Mandatory to create valid dates for Matlab, the engine only reads list() objects as date input 
 startDateMatlab = [startDateMatrix.year, startDateMatrix.month, startDateMatrix.day, startDateMatrix.hour, startDateMatrix.minute, startDateMatrix.second]
@@ -161,6 +163,10 @@ def EmptyVariables():
     stationIndicatorVariation = defaultdict(list)
 
 
+# ### ChoosePresetArea(`str`, `list`)
+# 
+# Outputs a list of max/min longitudes and latitudes according to specific preset, mainly for a gain of time. For now 3 presets are available and can be selected by the name of the area. For example, 'america' will return [30,54,240,307] corresponding to min lat, max lat, min long, max long. There is obviously a way to enter a custom area by selecting 'custom' and writing the degrees of the wanted zone.
+
 # In[5]:
 
 
@@ -211,19 +217,19 @@ def ChoosePresetArea(area,customArea):
 # 
 # 
 # #### Storing format
-# We store three arrays. The two first of shape (24,144), 24 degrees in latitude for 144 values each. The third array of shape (10, ) storing all the informations we need for the current day. All arrays gathered we get an array of shape (3, ) symbolising an array of three arrays.
+# We store three arrays. The two first of shape (24,144), 24 degrees in latitude for 144 values each. The third array of shape (12, ) storing all the informations we need for the current day. All arrays gathered we get an array of shape (3, ) symbolising an array of three arrays.
 # 
 # |Ground truth|Machine learning reconstruction|Infos|
 # |:-:|:-:|:-:|
-# |Absolute ground truth got from Matlab without any modification|The Ground truth with all nan values filled with Polynomial Regression|Informations about the current matrix|
-# |(24,144)|(24,144)|(10, )|
+# |Absolute ground truth got from Matlab without any modification|The Ground truth with all nan values filled with ML|Informations about the current matrix|
+# |(24,144)|(24,144)|(12, )|
 # 
 # The information array is constituted of:
 # 
-# |Date|Max latitude|Min latitude|Max longitude|Min longitude|Max value|Min value|Days|isQuiet|indice type|
-# |:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
-# |Date of the current matrix stored as datetime object|Latitude degree corresponding to the last index of the array|Latitude degree corresponding to the first index of the array|The maximum longitude degree in which are located our stations|The minimum longitude degree in which are located our stations|Maximum value in the matrix (in nT)|Minimum value in the matrix (in nT)|Number of days in the matrix|Is the current matrix conrresponding to a quiet day?|The indice type (x1, x2, y1, y2, alpha etc)|
-# |datetime.datetime|Integer|Integer|Integer|Integer|Float|Float|Integer|Bool|String
+# |Date|Max latitude|Min latitude|Max longitude|Min longitude|Max value|Min value|Days|isQuiet|Component type|Working stations|Area|
+# |:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
+# |Date of the current matrix stored as datetime object|Latitude degree corresponding to the last index of the array|Latitude degree corresponding to the first index of the array|The maximum longitude degree in which our stations are located|The minimum longitude degree in which are located our stations|Maximum value in the matrix (in nT)|Minimum value in the matrix (in nT)|Number of days in the matrix|Is the current matrix conrresponding to a quiet day?|The component type (x1, x2, y1, y2, alpha etc)|List all working stations name for the given matrix|In which Area are we? (EU, USA, Asia or Custom)|
+# |datetime.datetime|Integer|Integer|Integer|Integer|Float|Float|Integer|Bool|String|List|String|
 # 
 # Note that we have to load these arrays using:
 # ```python
@@ -246,8 +252,8 @@ def GenerateTrainingSet(indice,
                         application=None):
 
     global startDateMatrix, endDateMatrix, startDateMatlab, endDateMatlab, stationsWithNoData, stationsNonexistentInFolder, stationsOut, indicatorVariationArrayLocalTime, numberOfDaysWithData, latMin,latMax,longMin,longMax, timeBetweenValues, stationsLatitude
-    absoluteStartDate = datetime.datetime(startingDate[0],startingDate[1],startingDate[2],0,0,0)
-    absoluteEndDate = datetime.datetime(endingDate[0],endingDate[1],endingDate[2],0,0,0)
+    absolutstartDate = datetime.datetime(startingDate[0],startingDate[1],startingDate[2],0,0,0)
+    absolutendDate = datetime.datetime(endingDate[0],endingDate[1],endingDate[2],0,0,0)
 
 
     
@@ -257,13 +263,13 @@ def GenerateTrainingSet(indice,
     index=0
     isQuietDay = False
     
-    dataSetSize = absoluteEndDate-absoluteStartDate
+    dataSetSize = absolutendDate-absolutstartDate
     
     for i in range(0,dataSetSize.days,numberOfDaysPerMatrix):
         EmptyVariables()
         latMin, latMax, longMin, longMax = ChoosePresetArea(area,customArea)
         stationsLatitude = [''] * (latMax-latMin)
-        startDateMatrix = absoluteStartDate+datetime.timedelta(days=i)
+        startDateMatrix = absolutstartDate+datetime.timedelta(days=i)
         endDateMatrix = startDateMatrix+datetime.timedelta(days=numberOfDaysWithData)
         startDateMatlab = [startDateMatrix.year, startDateMatrix.month, startDateMatrix.day, 0, 0, 0]
         endDateMatlab = [endDateMatrix.year, endDateMatrix.month, endDateMatrix.day, 0, 0, 0]
@@ -284,15 +290,15 @@ def GenerateTrainingSet(indice,
                 break
             else: 
                 isQuietDay = False 
-        infosArray = np.array([startDateMatrix, latMax, latMin, longMax, longMin, maxValueinDataset, minValueinDataset, numberOfDaysPerMatrix, isQuietDay, indice, stationsLatitude, np.array([area, customArea])])
+        infosArray = np.array([startDateMatrix, latMax, latMin, longMax, longMin, maxValueinDataset, minValueinDataset, numberOfDaysPerMatrix, isQuietDay, indice, stationsLatitude, area])
         FinalArray = np.array([indicatorVariationArrayLocalTime, ReconstructedArray, infosArray, beforeVariance])
         np.save("{}/x_train/{}_{}".format(trainingDatasetPathASIA, indice, index), FinalArray)
         print("Matrix saved for date: {}".format(startDateMatrix))
-        print("Sample {} out of {}".format(i/numberOfDaysPerMatrix, dataSetSize.days/numberOfDaysPerMatrix))
+        print("Sample {} out of {}".format((i/numberOfDaysPerMatrix)+1, dataSetSize.days/numberOfDaysPerMatrix))
         
         index+=1
         if interface:
-            UpdateProgressBar(int(dataSetSize.days/numberOfDaysPerMatrix), int(i/numberOfDaysPerMatrix)+1, application)
+            UpdateInterface(int(dataSetSize.days/numberOfDaysPerMatrix), int(i/numberOfDaysPerMatrix)+1, application, str("Matrix saved for date: {}".format(startDateMatrix)), str("Sample {} out of {}".format((i/numberOfDaysPerMatrix)+1, dataSetSize.days/numberOfDaysPerMatrix)))
             application.update_idletasks()
         clear_output(wait=True)
 
@@ -491,16 +497,15 @@ def ManuallyNormalizeData01():
 # In[14]:
 
 
-def indexValueOnLocalTime(array, stationName, i, referenceLongitude):
+def indexValueOnLocalTime(array, stationName, i):
     numberOfValuesLong = array.shape[1]
     localTimeValuesArray = np.full((numberOfValuesLong), np.nan)
     long = float(stationsOut[stationName].get("longeo"))
     shiftValues = np.round((long*4)/timeBetweenValues,0)
     initialShiftValues = shiftValues
-    decreasingIndex=0
     increasingIndex=0
     for y in range(np.int16(numberOfValues/numberOfDaysWithData),numberOfValues):
-        localTimeValuesArray[np.int16(shiftValues+increasingIndex)] = array[i][y]
+        localTimeValuesArray[increasingIndex] = array[i][np.int16(y-shiftValues)]
         increasingIndex+=1
             
     return localTimeValuesArray 
@@ -549,7 +554,7 @@ def makeIndicatorVariationArray(stationLatitude, minLong):
                     stationsPerLat[i-latMin].append(st)
                     if len(stationIndicatorVariation[st])!=0:
                         indicatorVariationArray[i-latMin]=stationIndicatorVariation[st]
-                        indicatorVariationArrayLocalTime[i-latMin] = indexValueOnLocalTimeRefLong(indicatorVariationArray, st, i-latMin, minLong)
+                        indicatorVariationArrayLocalTime[i-latMin] = indexValueOnLocalTime(indicatorVariationArray, st, i-latMin)
                         stationLatitude[i-latMin] = st
                     else:
                         None
@@ -613,7 +618,7 @@ def PredictIndicatorForAllLatitudes(baseArray, regressor):
     predictionArray=np.copy(baseArray)
     RegressorParameters=None
     RegressorParametersPR = {'polynomialfeatures__degree': 2, 'linearregression__fit_intercept': True, 'linearregression__normalize': True} # For PolyRegression
-    RegressorParametersSVR = {'kernel' : 'rbf', 'gamma' : 1e-2, 'C' : 10} # For SupportVectorMachineRegression
+    RegressorParametersSVR = {'kernel' : 'rbf', 'gamma' : 1e-2, 'C' : 10} # For SupportVectorMachinregressorression
     RegressorParametersRFR = {'n_estimators' : 10, 'random_state' : 0} # For RandomForestRegression
     if regressor=='svr': RegressorParameters = RegressorParametersSVR
     elif regressor=='pr': RegressorParameters = RegressorParametersPR
@@ -652,7 +657,7 @@ def GetIndicatorLongPrediction(latitude,longitude, params, baseArray, regressor)
     x = np.arange(0, baseArray.shape[0], 1)
     x,y = RemoveNan(x, y)
     
-    if regressor=='svr': prediction = SupportVectorMachineRegression(x,y,params).predict(np.array(latitude).reshape(1,-1))
+    if regressor=='svr': prediction = SupportVectorMachinregressorression(x,y,params).predict(np.array(latitude).reshape(1,-1))
     elif regressor=='pr': prediction = PolyRegression(x,y,params).predict(np.array(latitude).reshape(1,-1))
     elif regressor=='rfr': prediction = RandomForestRegression(x,y,params).predict(np.array(latitude).reshape(1,-1))
         
@@ -681,7 +686,7 @@ def RemoveNan(latValues, indicatorValues):
 
 # ### PolyRegression(`numpy.array`, `numpy.array`, `Dict`)
 # 
-# Makes a polynomial regression. `poly_grid.fit(X,Y)` where `X` is the latitude and `Y` is the indice.
+# Makes a polynomial regression. `poly_grid.fit(X,Y)` where `X` is the latitude and `Y` is the indice. `params` corresponds to the regressor's parameters. 
 # The `PolynomialRegression()` definition is custom and detailed below.
 
 # In[21]:
@@ -694,6 +699,10 @@ def PolyRegression(latValues, indicatorValues, params):
     return poly_grid
 
 
+# ### RandomForestRegression(`numpy.array`, `numpy.array`, `Dict`)
+# 
+# Uses the Sklearn random forest regressor. `RandomForestRegressor.fit(X,Y)` where `X` is the latitude and `Y` is the indice. `params` corresponds to the regressor's parameters.
+
 # In[22]:
 
 
@@ -704,10 +713,14 @@ def RandomForestRegression(latValues, indicatorValues, params):
     return rf
 
 
+# ### SupportVectorMachinregressorression(`numpy.array`, `numpy.array`, `Dict`)
+# 
+# Uses the Sklearn SVR regressor. `SVR.fit(X,Y)` where `X` is the latitude and `Y` is the indice. `params` corresponds to the regressor's parameters.
+
 # In[23]:
 
 
-def SupportVectorMachineRegression(latValues, indicatorValues, params):
+def SupportVectorMachinregressorression(latValues, indicatorValues, params):
     svr = SVR()
     svr.set_params(**params)
     svr.fit(latValues, indicatorValues)
@@ -746,6 +759,10 @@ def ParametersTuningPoly(baseArray,long):
     return poly_gridTuning.best_params_
 
 
+# ### Interface(`object`)
+# 
+# Create an graphical interface to make the use of the generator more user friendly. It can be triggered by launching the .py script with the `-g` parameter. Typically, the command `python Generate_Training_Dataset.py -g` will start the graphical interface while `python Generate_Training_Dataset.py` won't.
+
 # In[26]:
 
 
@@ -753,85 +770,144 @@ class Interface(tk.Tk):
     
     def __init__(self):
         tk.Tk.__init__(self)
+        self.theme=ttk.Style()
+        self.theme.theme_use('clam')
         self.CreateWidgets()
     
     def CreateWidgets(self):
-        self.parametersFrame = tk.Frame(self)
-        self.parametersFrame.pack()
-
-        self.eIndice=tk.Label(self.parametersFrame,text="Indice")
-        self.eIndice.grid(row=1,column=0)
-        self.eIndice=tk.Entry(self.parametersFrame)
-        self.eIndice.insert(tk.END, 'y2')
-        self.eIndice.grid(row=1,column=1)
-
-        self.eStartDate=tk.Label(self.parametersFrame,text="Starting date")
-        self.eStartDate.grid(row=2,column=0)
-        self.eStartDate=tk.Entry(self.parametersFrame)
-        self.eStartDate.insert(tk.END, '2015,1,1')
-        self.eStartDate.grid(row=2,column=1)
-
-        self.eEndDate=tk.Label(self.parametersFrame,text="Ending date")
-        self.eEndDate.grid(row=3,column=0)
-        self.eEndDate=tk.Entry(self.parametersFrame)
-        self.eEndDate.insert(tk.END, '2015,1,6')
-        self.eEndDate.grid(row=3,column=1)
-
-        self.eArea=tk.Label(self.parametersFrame,text="Area")
-        self.eArea.grid(row=4,column=0)
-        self.eArea=tk.Entry(self.parametersFrame)
-        self.eArea.insert(tk.END, 'asia')
-        self.eArea.grid(row=4,column=1)
-
-        self.eDays=tk.Label(self.parametersFrame,text="Days in the matrix")
-        self.eDays.grid(row=5,column=0)
-        self.eDays=tk.Entry(self.parametersFrame)
-        self.eDays.insert(tk.END, '1')
-        self.eDays.grid(row=5,column=1)
-
-        self.eMinutes=tk.Label(self.parametersFrame,text="Minutes between each value")
-        self.eMinutes.grid(row=6,column=0)
-        self.eMinutes=tk.Entry(self.parametersFrame)
-        self.eMinutes.insert(tk.END, '10')
-        self.eMinutes.grid(row=6,column=1)
-
-        self.eReg=tk.Label(self.parametersFrame,text="Machine Learning Regressor")
-        self.eReg.grid(row=7,column=0)
-        self.eReg=tk.Entry(self.parametersFrame)
-        self.eReg.insert(tk.END, 'svr')
-        self.eReg.grid(row=7,column=1)
-
+        global app_bg_color
+        self.font = Font(family="Comic", size=12, weight="bold", slant="italic")
+        self.stickyLabels = 'w'
+        self.secondBG = "#b66d38"
+        self.text = tk.Text(self)
+        self.text.configure(font=self.font)
         
-        self.bLaunch = tk.Button(self, text='Start generator', command= lambda *args: GenerateTrainingSet(self.eIndice.get(), np.fromstring(self.eStartDate.get(), dtype=int, sep=','), np.fromstring(self.eEndDate.get(), dtype=int, sep=','), self.eArea.get(), int(self.eDays.get()), int(self.eMinutes.get()), self.eReg.get(), interface=True, application=self)).pack()
+        
+        self.mainFrame = tk.Frame(self, bg=app_bg_color)
+        self.mainFrame.pack()
+        
+        self.parametersFrame = tk.Frame(self.mainFrame, bg=self.secondBG)
+        self.parametersFrame.grid(row=0,column=1,pady=20)
+        
+        self.activeWidgetsFrame = tk.Frame(self.mainFrame, bg=self.secondBG)
+        self.activeWidgetsFrame.grid(row=1,column=1)
+        
+        
+        self.component=tk.Label(self.parametersFrame,text="Component", bg=self.secondBG)
+        self.component.configure(font=self.font)
+        self.component.grid(row=1,column=0, sticky=self.stickyLabels)
+        self.component=tk.Entry(self.parametersFrame)
+        self.component.insert(tk.END, 'y2')
+        self.component.grid(row=1,column=1)
 
-        self.progressbar = ttk.Progressbar(self,orient ="horizontal",length = 200, mode ="determinate")
-        self.progressbar.pack()
+        self.startDate=tk.Label(self.parametersFrame,text="Starting date", bg=self.secondBG)
+        self.startDate.configure(font=self.font)
+        self.startDate.grid(row=2,column=0, sticky=self.stickyLabels)
+        self.startDate=tk.Entry(self.parametersFrame)
+        self.startDate.insert(tk.END, '2015,1,1')
+        self.startDate.grid(row=2,column=1)
+
+        self.endDate=tk.Label(self.parametersFrame,text="Ending date", bg=self.secondBG)
+        self.endDate.configure(font=self.font)
+        self.endDate.grid(row=3,column=0, sticky=self.stickyLabels)
+        self.endDate=tk.Entry(self.parametersFrame)
+        self.endDate.insert(tk.END, '2015,1,6')
+        self.endDate.grid(row=3,column=1)
+
+        self.area=tk.Label(self.parametersFrame,text="Area", bg=self.secondBG)
+        self.area.configure(font=self.font)
+        self.area.grid(row=4,column=0, sticky=self.stickyLabels)
+        self.area=tk.Entry(self.parametersFrame)
+        self.area.insert(tk.END, 'asia')
+        self.area.grid(row=4,column=1)
+
+        self.days=tk.Label(self.parametersFrame,text="Days in the matrix", bg=self.secondBG)
+        self.days.configure(font=self.font)
+        self.days.grid(row=5,column=0, sticky=self.stickyLabels)
+        self.days=tk.Entry(self.parametersFrame)
+        self.days.insert(tk.END, '1')
+        self.days.grid(row=5,column=1)
+
+        self.minutes=tk.Label(self.parametersFrame,text="Minutes between each value", bg=self.secondBG)
+        self.minutes.configure(font=self.font)
+        self.minutes.grid(row=6,column=0, sticky=self.stickyLabels)
+        self.minutes=tk.Entry(self.parametersFrame)
+        self.minutes.insert(tk.END, '10')
+        self.minutes.grid(row=6,column=1)
+
+        self.regressor=tk.Label(self.parametersFrame,text="Machine Learning Regressor", bg=self.secondBG)
+        self.regressor.configure(font=self.font)
+        self.regressor.grid(row=7,column=0, sticky=self.stickyLabels)
+        self.regressor=tk.Entry(self.parametersFrame)
+        self.regressor.insert(tk.END, 'svr')
+        self.regressor.grid(row=7,column=1)
+        
+        self.launch = tk.Button(self.activeWidgetsFrame, text='Start generator', command= lambda *args : start_GenerateTrainingSet_thread({'indice':self.component.get(), 
+                                                                                                                                        'startingDate':np.fromstring(self.startDate.get(), dtype=int, sep=','), 
+                                                                                                                                        'endingDate':np.fromstring(self.endDate.get(), dtype=int, sep=','), 
+                                                                                                                                        'area':self.area.get(), 
+                                                                                                                                        'numberOfDaysPerMatrix':int(self.days.get()), 
+                                                                                                                                        'minutesBetweenValues':int(self.minutes.get()), 
+                                                                                                                                        'regressor':self.regressor.get(), 
+                                                                                                                                        'customArea':[0,0,0,0],
+                                                                                                                                        'interface':True,
+                                                                                                                                        'application':self}))
+        self.launch.grid(row=1, column=0,pady=5)
+        
+        self.kill = tk.Button(self.activeWidgetsFrame, text='Stop generator', command=self.destroy)
+        self.kill.grid(row=1, column=1,pady=5)
+        
+        self.progressbar = ttk.Progressbar(self.activeWidgetsFrame,orient ="horizontal",length = 200, mode ="determinate")
+        self.progressbar.grid(row=2, column=0,columnspan=2)
         self.progressbar["maximum"] = 100
         self.progressbar["value"] = 0
+        
+        
+        self.progressLabel1=tk.Label(self.activeWidgetsFrame,text="")
+        self.progressLabel1.grid(row=3, column=0, columnspan=2)
+        self.progressLabel2=tk.Label(self.activeWidgetsFrame,text="")
+        self.progressLabel2.grid(row=4, column=0, columnspan=2)
 
 
-# In[27]:
-
-
-def UpdateProgressBar(maxValue, currentValue, app):
-    app.progressbar["maximum"]=maxValue
-    app.progressbar["value"]=currentValue
-
+# ### start_GenerateTrainingSet_thread(Dict)
 
 # In[28]:
 
 
+def start_GenerateTrainingSet_thread(params):
+    th = threading.Thread(target=GenerateTrainingSet, kwargs=params)
+    th.start()
+
+
+# ### UpdateInterface(`int`, `int`, `object`, `str`, `str`)
+# 
+# Updates dynamically the interface progress bar and labels through processing.
+
+# In[29]:
+
+
+def UpdateInterface(maxValue, currentValue, app, pg1, pg2):
+    app.progressLabel1['text'] = pg1
+    app.progressLabel2['text'] = pg2
+    app.progressbar["maximum"]=maxValue
+    app.progressbar["value"]=currentValue
+    
+
+
 
 if len(sys.argv) > 1:
-    if sys.argv[1]=='graphical':
+    if sys.argv[1]=='-g':
+        app_bg_color = '#180e0c'
         app = Interface()
         app.title("Dataset Generator")
         app.resizable(width=False, height=False)
-
-        posX = (int(app.winfo_screenwidth()) // 2) - (400 // 2)
-        posY = (int(app.winfo_screenheight()) // 2) - (200 // 2)
-        geo = "{}x{}+{}+{}".format(400,200,posX,posY)
+        appW=400
+        appH=260
+        posX = (int(app.winfo_screenwidth()) // 2) - (appW // 2)
+        posY = (int(app.winfo_screenheight()) // 2) - (appH // 2)
+        geo = "{}x{}+{}+{}".format(appW,appH,posX,posY)
         app.geometry(geo)
+        app["bg"]=app_bg_color
         app.mainloop()
     else: print("Unknown parameter")
 else:
@@ -842,8 +918,4 @@ else:
             numberOfDaysPerMatrix=1, 
             minutesBetweenValues=10, 
             regressor='svr') # launch the main def
-# In[ ]:
-
-
-
 
