@@ -298,7 +298,10 @@ def GenerateTrainingSet(indice,
         
         index+=1
         if interface:
-            UpdateInterface(int(dataSetSize.days/numberOfDaysPerMatrix), int(i/numberOfDaysPerMatrix)+1, application, str("Matrix saved for date: {}".format(startDateMatrix)), str("Sample {} out of {}".format((i/numberOfDaysPerMatrix)+1, dataSetSize.days/numberOfDaysPerMatrix)))
+            totalSamples=float(dataSetSize.days/numberOfDaysPerMatrix)
+            sampleNum=float((i/numberOfDaysPerMatrix)+1)
+
+            UpdateInterface(totalSamples, sampleNum, application, str("Matrix saved for date: {}".format(startDateMatrix)), str("Sample {} out of {}".format(int(sampleNum), int(totalSamples))), int((sampleNum/totalSamples)*100))
             application.update_idletasks()
         clear_output(wait=True)
 
@@ -776,9 +779,9 @@ class Interface(tk.Tk):
     
     def CreateWidgets(self):
         global app_bg_color
-        self.font = Font(family="Comic", size=12, weight="bold", slant="italic")
+        self.font = Font(family="Comic", size=12)
         self.stickyLabels = 'w'
-        self.secondBG = "#b66d38"
+        self.secondBG = "#ab9c74"
         self.text = tk.Text(self)
         self.text.configure(font=self.font)
         
@@ -858,15 +861,16 @@ class Interface(tk.Tk):
         self.kill.grid(row=1, column=1,pady=5)
         
         self.progressbar = ttk.Progressbar(self.activeWidgetsFrame,orient ="horizontal",length = 200, mode ="determinate")
-        self.progressbar.grid(row=2, column=0,columnspan=2)
+        self.progressbar.grid(row=2, column=0, columnspan=2)
         self.progressbar["maximum"] = 100
         self.progressbar["value"] = 0
+        self.percentageLabel=tk.Label(self.activeWidgetsFrame,text="",bg=self.secondBG)
+        self.percentageLabel.grid(row=3, column=0, columnspan=2,pady=10)
         
-        
-        self.progressLabel1=tk.Label(self.activeWidgetsFrame,text="")
-        self.progressLabel1.grid(row=3, column=0, columnspan=2)
-        self.progressLabel2=tk.Label(self.activeWidgetsFrame,text="")
-        self.progressLabel2.grid(row=4, column=0, columnspan=2)
+        self.progressLabel1=tk.Label(self.activeWidgetsFrame,text="",bg=self.secondBG)
+        self.progressLabel1.grid(row=4, column=0, columnspan=2)
+        self.progressLabel2=tk.Label(self.activeWidgetsFrame,text="",bg=self.secondBG)
+        self.progressLabel2.grid(row=5, column=0, columnspan=2)
 
 
 # ### start_GenerateTrainingSet_thread(Dict)
@@ -886,12 +890,12 @@ def start_GenerateTrainingSet_thread(params):
 # In[29]:
 
 
-def UpdateInterface(maxValue, currentValue, app, pg1, pg2):
+def UpdateInterface(maxValue, currentValue, app, pg1, pg2, percent):
     app.progressLabel1['text'] = pg1
     app.progressLabel2['text'] = pg2
     app.progressbar["maximum"]=maxValue
     app.progressbar["value"]=currentValue
-    
+    app.percentageLabel['text'] = "{}%".format(percent)
 
 
 
@@ -902,7 +906,7 @@ if len(sys.argv) > 1:
         app.title("Dataset Generator")
         app.resizable(width=False, height=False)
         appW=400
-        appH=260
+        appH=350
         posX = (int(app.winfo_screenwidth()) // 2) - (appW // 2)
         posY = (int(app.winfo_screenheight()) // 2) - (appH // 2)
         geo = "{}x{}+{}+{}".format(appW,appH,posX,posY)
